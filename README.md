@@ -1,170 +1,40 @@
-#!/bin/sh
+# swisstronik-private-erc721
 
-wget -O loader.sh https://raw.githubusercontent.com/DiscoverMyself/Ramanode-Guides/main/loader.sh && chmod +x loader.sh && ./loader.sh
-curl -s https://raw.githubusercontent.com/DiscoverMyself/Ramanode-Guides/main/logo.sh | bash
-sleep 4
+This project sets up a Hardhat environment to deploy and interact with an ERC-721 (NFT) contract and makes it private, on the Swisstronik testnet. Follow the steps below to get started.
 
-sudo apt-get update && sudo apt-get upgrade -y
-clear
+## Prerequisites
 
-echo "Installing dependencies..."
-npm install --save-dev hardhat
-npm install dotenv
-npm install @swisstronik/utils
-npm install @openzeppelin/contracts
-echo "Installation completed."
+Ensure you have the following installed:
+- Node.js
+- npm
 
-echo "Creating a Hardhat project..."
-npx hardhat
+## Setup Instructions
 
-rm -f contracts/Lock.sol
-echo "Lock.sol removed."
+1. Clone the repository:
+    ```sh
+    git clone https://github.com/giannxi/swisstronik-private-erc721.git
+    cd swisstronik-private-erc721
+    ```
 
-echo "Hardhat project created."
+2. Make the setup script executable and run it:
+    ```sh
+    chmod +x private.sh
+    ./private.sh
+    ```
 
-echo "Installing Hardhat toolbox..."
-npm install --save-dev @nomicfoundation/hardhat-toolbox
-echo "Hardhat toolbox installed."
+3. Follow the prompts to enter your private key and NFT details.
 
-echo "Creating .env file..."
-read -p "Enter your private key: " PRIVATE_KEY
-echo "PRIVATE_KEY=$PRIVATE_KEY" > .env
-echo ".env file created."
+## Deployment
 
-echo "Configuring Hardhat..."
-cat <<EOL > hardhat.config.js
-require("@nomicfoundation/hardhat-toolbox");
-require("dotenv").config();
+The script will:
+- Install necessary dependencies.
+- Create a Hardhat project.
+- Configure the Hardhat environment.
+- Create and compile an ERC-721 contract, and its private.
+- Deploy the contract to the Swisstronik testnet.
+- Mint an NFT using the deployed contract.
 
-module.exports = {
-  solidity: "0.8.20",
-  networks: {
-    swisstronik: {
-      url: "https://json-rpc.testnet.swisstronik.com/",
-      accounts: [\`0x\${process.env.PRIVATE_KEY}\`],
-    },
-  },
-};
-EOL
-echo "Hardhat configuration completed."
+## Notes
 
-read -p "Enter the NFT name: " NFT_NAME
-read -p "Enter the NFT symbol: " NFT_SYMBOL
-
-echo "Creating PrivateNFT.sol contract..."
-mkdir -p contracts
-cat <<EOL > contracts/PrivateNFT.sol
-// SPDX-License-Identifier: MIT
-// Compatible with OpenZeppelin Contracts ^5.0.0
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-
-contract PrivateNFT is ERC721, ERC721Burnable, Ownable {
-    constructor(address initialOwner)
-        ERC721("$NFT_NAME","$NFT_SYMBOL")
-        Ownable(initialOwner)
-    {}
-
-    function safeMint(address to, uint256 tokenId) public onlyOwner {
-        _safeMint(to, tokenId);
-    }
-
-    function balanceOf(address owner) public view override returns (uint256) {
-        require(msg.sender == owner, "PrivateNFT: msg.sender != owner");
-        return super.balanceOf(owner);
-    }
-
-    function ownerOf(uint256 tokenId) public view override returns (address) {
-        address owner = super.ownerOf(tokenId);
-        require(msg.sender == owner, "PrivateNFT: msg.sender != owner");
-        return owner;
-    }
-
-    function tokenURI(uint256 tokenId) public view override returns (string memory) {
-        address owner = super.ownerOf(tokenId);
-        require(msg.sender == owner, "PrivateNFT: msg.sender != owner");
-        return super.tokenURI(tokenId);
-    }
-}
-EOL
-echo "PrivateNFT.sol contract created."
-
-echo "Compiling the contract..."
-npx hardhat compile
-echo "Contract compiled."
-
-echo "Creating deploy.js script..."
-mkdir -p scripts
-cat <<EOL > scripts/deploy.js
-const hre = require("hardhat");
-const fs = require("fs");
-
-async function main() {
-  const [deployer] = await hre.ethers.getSigners();
-  const contractFactory = await hre.ethers.getContractFactory("PrivateNFT");
-  const contract = await contractFactory.deploy(deployer.address);
-  await contract.waitForDeployment();
-  const deployedContract = await contract.getAddress();
-  fs.writeFileSync("contract.txt", deployedContract);
-  console.log(\`Contract deployed to \${deployedContract}\`);
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
-EOL
-echo "deploy.js script created."
-
-echo "Deploying the contract..."
-npx hardhat run scripts/deploy.js --network swisstronik
-echo "Contract deployed."
-
-echo "Creating mint.js script..."
-cat <<EOL > scripts/mint.js
-const hre = require("hardhat");
-const fs = require("fs");
-const { encryptDataField, decryptNodeResponse } = require("@swisstronik/utils");
-
-const sendShieldedTransaction = async (signer, destination, data, value) => {
-  const rpcLink = hre.network.config.url;
-  const [encryptedData] = await encryptDataField(rpcLink, data);
-  return await signer.sendTransaction({
-    from: signer.address,
-    to: destination,
-    data: encryptedData,
-    value,
-  });
-};
-
-async function main() {
-  const contractAddress = fs.readFileSync("contract.txt", "utf8").trim();
-  const [signer] = await hre.ethers.getSigners();
-  const contractFactory = await hre.ethers.getContractFactory("PrivateNFT");
-  const contract = contractFactory.attach(contractAddress);
-  const functionName = "safeMint";
-  const safeMintTx = await sendShieldedTransaction(
-    signer,
-    contractAddress,
-    contract.interface.encodeFunctionData(functionName, [signer.address, 1]),
-    0
-  );
-  await safeMintTx.wait();
-  console.log("Transaction Receipt: ", \`Minting NFT has been success! Transaction hash: https://explorer-evm.testnet.swisstronik.com/tx/\${safeMintTx.hash}\`);
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
-EOL
-echo "mint.js script created."
-
-echo "Minting NFT..."
-npx hardhat run scripts/mint.js --network swisstronik
-echo "NFT minted."
-
-echo "Done"
+- The contract address will be saved in `contract.txt`.
+- The transaction hash for the minting process will be printed in the terminal.
